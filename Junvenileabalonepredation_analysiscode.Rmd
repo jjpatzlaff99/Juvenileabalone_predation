@@ -1,0 +1,2136 @@
+---
+title: "Juvenileabalonepredation_analysiscode"
+output: html_document
+date: "2024-09-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#loading libraries
+```{r}
+#esquisse::esquisser()
+library(dplyr)
+library(GGally)
+library(tidyverse)
+library(tidyr)
+library(ggplot2)
+library(ggfortify)
+library(car)
+library(ggpubr)
+library(multcompView)
+library(Hotelling)
+library(vegan)
+library(factoextra)
+library(FactoMineR)
+library(agricolae)
+library(ggpubr)
+library(rstatix)
+library(vegan)
+library(effsize)
+library(broom)
+library(performance)
+library(DHARMa)
+library(glmmTMB)
+library(emmeans)
+library(measurements)
+library(haven)
+library(jtools)
+library(ggstance)
+library(ROCR)
+library(sjstats)
+library(effects)
+library(devtools)
+library(DescTools)
+library(gridExtra)
+library(lubridate)
+
+setwd("~/Documents/GitHub/Juvenileabalone_predation")
+
+```
+#Juvenile Abalone Predation
+```{r}
+#reads in the data set which contains all data. Each row is a single abalone that was deployed, and contains other columns indicating region, site, zone, date, etc. 
+
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv",header=T)
+
+abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
+#excludes any blanks or NAs where island is not displayed
+view(abpredation)
+
+#exclude any irrelevant columns, filter out controls + nas
+abpredation2 <- abpredation %>% 
+  select(-c(8:9, 20, 21, 23:40)) %>% 
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") 
+view(abpredation2)
+
+str(abpredation2) #check the types of data each column shows (numerical or factor)
+view(abpredation2) #321 observations which is good - this is total number we deployed excluding controls
+
+#exclude replicates as noted in section 2.5
+abpredationspace <- abpredation2 %>% 
+  filter(Exclude.analysis1!="Yes")
+view(abpredationspace)
+#now left with 269 replicates after exclusions were made
+
+#total deployed per site.
+abpredationspacetot<-abpredation2s %>%  
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control")  #filter out controls #filter out reps we are excluding
+abpredationspacetot
+abpredationspacetotcount<-abpredationspacetot %>%
+  group_by(Island, Site) %>% 
+  summarize(total_deployed=n())
+abpredationspacetotcount
+
+# total excluded per site
+abpredationspaceexclude<-abpredation2s %>%  
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") %>%  #filter out controls
+  filter(Exclude.analysis1=="Yes") #filter out reps we are excluding
+abpredationspaceexclude
+abpredationspaceexcount<-abpredationspaceexclude %>%
+  group_by(Island, Site) %>% 
+  summarize(number_excluded=n())
+abpredationspaceexcount
+
+#total deployed per site after exclusions
+abpredationspacedep <- abpredationspace %>% 
+  group_by(Island, Site) %>% 
+  summarize(total_deployed_after_exclusions=n())
+abpredationspacedep
+```
+
+##Island and Zone - Proportion Abalone Predated
+```{r}
+### To address the question "Does community predation on juvenile abalone differ independently by island or by zone?" we will use proportion predated per transect as our response variable. Thus, we can use a GLM to see if there is a difference in "proportion predated" between islands SNIvs.SCI and between zones mid vs. low.
+####GLM allows us to use a non normal distribution to fit to our data. Because our response variable is in proportions, we can use a GLM with a binomial distribution, which is typical for proportions or 0s and 1s. The original data at the level of each animal are not used, but rather the proportion of animals that were predated within a single transect.  
+
+#creating a data frame that shows proportion predated and not predated for each zone within each site
+abpredationspaceprop<-abpredationspace %>%
+  group_by(Island, Site, Site.name, Zone, TransID, Predated.1) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_predated = count/sum(count),
+         deployed=sum(count)) 
+view(abpredationspaceprop)
+
+#the loop eel low zone had 0 abs not predated, so manually adding a row that says zero predated
+abpredationspaceprop$Predated.1<-as.factor(abpredationspaceprop$Predated.1)
+newrow<- data.frame(Island = "SCI", Site = "Site 1", Site.name= "Eel loop", Zone = "Low", TransID="LEL", Predated.1 = 0, count = 0, proportion_predated=0, deployed=19)
+newrow$Predated.1<-as.factor(newrow$Predated.1)
+abpredationspaceprop<-rbind(abpredationspaceprop, newrow)
+
+#makes sure each column is categorized correctly
+abpredationspaceprop$Zone<-as.factor(abpredationspaceprop$Zone)
+abpredationspaceprop$Site<-as.factor(abpredationspaceprop$Site)
+abpredationspaceprop$Island<-as.factor(abpredationspaceprop$Island)
+abpredationspaceprop$Site.name<-as.factor(abpredationspaceprop$Site.name)
+
+#adjust variable labels
+abpredationspaceprop$Zone <- factor(abpredationspaceprop$Zone, levels= c("High","Low"), labels=c("Mid", "Low"))
+abpredationspaceprop$Island<- factor(abpredationspaceprop$Island, levels=c("SCI", "SNI"), labels = c("San Clemente Island", "San Nicolas Island"))
+
+#adjust column names
+colnames(abpredationspaceprop) <- c("Island", "Site", "Site Name", "Zone", "TransID", "Predated", "Count", "proportion_predated", "deployed")
+
+view(abpredationspaceprop) #this data frame will be used throughout analysis
+
+##counting total number predated across all sites on both islands
+abpredationspacetotal<-abpredationspace %>%
+  group_by(Predated.1) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_predated = count/sum(count),
+         total_depl=sum(count)) 
+abpredationspacetotal
+#156 predated out of 269 deployed
+
+##counting total number predated across all sites by island
+abpredationspacetotalisl<-abpredationspace %>%
+  group_by(Island,Predated.1) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_predated = count/sum(count),
+         total_depl=sum(count)) 
+abpredationspacetotalisl
+#121/144=0.84 on SCI, and 35/125=0.28 on SNI
+
+#percent difference = ~200%
+(0.84-0.28)/0.28
+
+#visualize data in histogram and calculate summary statistics
+#first remove rows counting proportion not predated (i.e. predated=0)
+abpredationspaceprop1 <- abpredationspaceprop %>% 
+  filter(Predated == 1)
+view(abpredationspaceprop1)
+
+#histogram of proportions shows two clusters, likely representing SNI and SCI
+ggplot(abpredationspaceprop1, aes(x=proportion_predated)) + geom_histogram(binwidth=0.05)
+
+#stats for SCI, overall high proportion predated
+mean(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Island== 'San Clemente Island'],na.rm = T)
+sd(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Island== 'San Clemente Island'],na.rm = T)
+summary(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Island== 'San Clemente Island'],na.rm = T)
+
+#stats for SNI, overall low proportion predated
+mean(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Island== 'San Nicolas Island'],na.rm = T)
+sd(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Island== 'San Nicolas Island'],na.rm = T)
+summary(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Region== 'San Nicolas Island'],na.rm = T)
+
+#stats for mid zone
+mean(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Mid'],na.rm = T)
+sd(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Mid'],na.rm = T)
+summary(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Mid'],na.rm = T)
+
+#stats for low zone
+mean(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Low'],na.rm = T)
+sd(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Low'],na.rm = T)
+summary(abpredationspaceprop1$proportion_predated[abpredationspaceprop1$Zone== 'Low'],na.rm = T)
+#proportions look similar for mid and low zones
+
+#visualize data in bar graph
+#change site labels
+abpredationspaceprop1$Site <- factor(abpredationspaceprop1$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 4", "Site 1", "Site 2", "Site 3", "Site 4"), labels= c( "1", "2", "3", "4", "1", "2", "3", "4"))
+
+Prop_predation_islandsitezoneimgboth <- abpredationspaceprop1 %>%
+ ggplot() +
+  aes(x = Site, y = proportion_predated, fill = Zone) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c(Mid = "#ABBBD8", Low = "#082755")) +
+  labs(
+    x = "Site",
+    y = "Proportion predated",
+    fill = "Intertidal Zone"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    legend.position = c(0.85, 0.85),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18)
+  ) + 
+  facet_grid(.~Island, scales = "free_x", space = "free_x")
+Prop_predation_islandsitezoneimgboth
+```
+
+### Island and Zone - Proportion abalone predated analysis
+```{r}
+#we will generate a binomial GLM.
+abpredationspaceprop1
+ab_binomial_space <- glm(formula = cbind(Count, deployed - Count) ~ Island + Zone, family = binomial(logit), data = abpredationspaceprop1)
+
+summary(ab_binomial_space) #summarizes the model fit
+summ(ab_binomial_space) # still a summary but with BIC
+#the log odds of predation decrease by 2.60502 on San Nicolas compared to San Clemente
+#zone does not have effect on model fit.
+#Residual deviance is much lower than the null deviance, indicating that the current model explains a good amount of variation.
+
+drop1(ab_binomial_space) #what does dropping each term do for the model fit
+#drop in AIC from dropping zone is fairly small, so we will keep zone, drop in AIC is large for Region which indicates that it is an important factor for the model fit
+
+#check for overdispersion
+resid_dev <- deviance(ab_binomial_space)
+resid_df <- df.residual(ab_binomial_space)
+overdispersion <- resid_dev / resid_df
+overdispersion
+#not overdispersed
+
+#this simulates residual plots from DHARMa package, helpful with binary data
+sim_resid <- simulateResiduals(fittedModel = ab_binomial_space)
+plot(sim_resid)
+#no problems detected in these plots, we will accept model
+
+#compare the model with region and the model without region.
+# Full model with Region
+full_model <- glm(cbind(Count, deployed - Count) ~ Island + Zone, family = binomial(logit), data = abpredationspaceprop1)
+
+# Reduced model without Region
+reduced_model <- glm(cbind(Count, deployed - Count) ~ Zone, family = binomial(logit), data = abpredationspaceprop1)
+
+# Perform likelihood ratio test (LRT)
+anova(full_model, reduced_model, test = "Chisq")
+#the model without region is significantly different and the residual deviance increases by a lot, which indicates that region is a significant factor 
+
+
+#direct comparison between San Clemente and San Nicolas using estimated marginal means
+emmeans_abregion <- emmeans(ab_binomial_space, ~ Island) #calculates the estimated marginal means
+
+pairwise_comparisons <- pairs(emmeans_abregion, adjust = "tukey", type="response")
+
+# View the results on the response scale
+summary(pairwise_comparisons, infer=TRUE)
+#odds ratio is 13.5, so the odds of predation on San Clemente island are 13.5x that of San Nicolas Island.
+```
+##Sites on SNI - Proportion abalone predated analysis
+```{r}
+#mean proportion predated on SNI averaged across zone - for reference
+abpredationmeanSNI<- abpredationspaceprop %>% 
+  filter(Island== "San Nicolas Island") %>% 
+  filter(Predated==1) %>% 
+  group_by(Site) %>% 
+  summarize(mean_proppredSNI=mean(proportion_predated),
+            count=n(),
+            se_proppredSNI=sd(proportion_predated)/sqrt(count))
+abpredationmeanSNI
+
+#visualize SNI predation
+Prop_predation_siteSNIimg <- abpredationmeanSNI %>%
+ ggplot() +
+  aes(x = Site, y = mean_proppredSNI) +
+  geom_bar(stat = "identity", fill="#49679C")+
+geom_errorbar(aes(ymin = mean_proppredSNI - se_proppredSNI, ymax = mean_proppredSNI + se_proppredSNI), color="black", width = 0.2)+
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c()) +
+  labs(
+    x = "Site on SNI",
+    y = "Proportion predated"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  )
+Prop_predation_siteSNIimg
+
+# Create dataframe with only SNI
+abpredationspacepropSNI1 <- abpredationspaceprop %>% 
+  filter(Island=="San Nicolas Island") %>% 
+  filter(Predated==1)
+view(abpredationspacepropSNI1)
+
+#change site labels
+abpredationspacepropSNI1$Site <- factor(abpredationspacepropSNI1$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 4"), labels= c("1", "2", "3", "4"))
+abpredationspacepropSNI1
+
+#generate binomial GLM
+ab_binomial_SNI_site <- glm(formula = cbind(Count, deployed - Count) ~ Site, family = binomial(logit), data = abpredationspacepropSNI1)
+
+summary(ab_binomial_SNI_site)
+summ(ab_binomial_SNI_site)
+#Looks like none of the sites are different from the reference site. 
+#Residual deviance is lower than the null deviance, indicating that the current model explains some variation.Pseudo_R2 values are not great, and is likely due to the small sample size. 
+
+#model diagnostics
+resid_dev2 <- deviance(ab_binomial_SNI_site)
+resid_df2 <- df.residual(ab_binomial_SNI_site)
+overdispersion2 <- resid_dev2 / resid_df2
+overdispersion2
+#underdispersed, likely due to low sample size but not much we can do to fix
+
+sim_resid2 <- simulateResiduals(fittedModel = ab_binomial_SNI_site)
+plot(sim_resid2)
+#no issues detected in DHARMa residual plots
+```
+
+##Sites on SCI - Proportion abalone predated analysis
+```{r}
+#mean proportion predated on SCI averaged across zone - for reference
+abpredationmeanSCI<- abpredationspaceprop %>% 
+  filter(Island== "San Clemente Island") %>% 
+  filter(Predated==1) %>% 
+  group_by(Site) %>% 
+  summarize(mean_proppredSCI=mean(proportion_predated),
+            count=n(),
+            se_proppredSCI=sd(proportion_predated)/sqrt(count))
+abpredationmeanSCI
+
+#visualize SCI predation
+Prop_predation_siteSCIimg <- abpredationmeanSCI %>%
+ ggplot() +
+  aes(x = Site, y = mean_proppredSCI) +
+  geom_bar(stat = "identity", fill="#49679C")+
+geom_errorbar(aes(ymin = mean_proppredSCI - se_proppredSCI, ymax = mean_proppredSCI + se_proppredSCI), color="black", width = 0.2)+
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c()) +
+  labs(
+    x = "Site on SCI",
+    y = "Proportion predated"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  )
+Prop_predation_siteSCIimg
+
+# Create dataframe with only SCI
+abpredationspacepropSCI2 <- abpredationspaceprop %>% 
+  filter(Island=="San Clemente Island") %>% 
+  filter(Predated==1)
+view(abpredationspacepropSCI2)
+
+#change site labels
+abpredationspacepropSCI2$Site <- factor(abpredationspacepropSCI2$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 4"), labels= c("1", "2", "3", "4"))
+abpredationspacepropSCI2
+
+ab_binomial_SCI_site <- glm(formula = cbind(Count, deployed - Count) ~ Site, family = binomial(logit), data = abpredationspacepropSCI2)
+
+summary(ab_binomial_SCI_site)
+summ(ab_binomial_SCI_site)
+#Looks like there could be a difference between Site 2 and Site 1. 
+#Residual deviance is lower than the null deviance, indicating that the current model explains some variation. Pseudo_R2 values are not great, and is likely due to the small sample size. 
+
+#post hoc with pairwise comparisons
+emmeans_abSCI <- emmeans(ab_binomial_SCI_site, ~ Site) #calculates the estimated marginal means
+
+pairwise_comparisons2 <- pairs(emmeans_abSCI, adjust = "tukey", type="response")
+
+# View the results on the response scale
+summary(pairwise_comparisons2, infer=TRUE)
+#based on pairwise comparisons, does not look like there is a difference between any of the site pairs
+
+#model diagnostics
+resid_dev3 <- deviance(ab_binomial_SCI_site)
+resid_df3 <- df.residual(ab_binomial_SCI_site)
+overdispersion3 <- resid_dev3 / resid_df3
+overdispersion3
+#dispersion looks okay
+
+sim_resid3 <- simulateResiduals(fittedModel = ab_binomial_SCI_site)
+plot(sim_resid3)
+#no issues detected in DHARMa residual plots
+```
+
+##Expanded GLM
+### Predator density + habitat characteristics 
+```{r}
+#read in data again
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv", header=T)
+abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
+#excludes any blanks or NAs where island is not displayed
+view(abpredation)
+
+#exclude any irrelevant columns, filter out controls + nas
+abpredation2 <- abpredation %>% 
+  select(-c(8:9, 20, 21, 27:29, 34:35, 40)) %>% 
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") 
+view(abpredation2)
+
+#looking at relationship between proportion predated and additional variables like predator density and habitat characteristics, in addition to Island which is a known important factor
+
+abpredation2isl<-abpredation2 %>% 
+  filter(Island=="SNI"| Island=="SCI") %>% 
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") %>% 
+  filter(Site.name!="Boy Scout") #Excluding boy scout because no habitat characteristics recorded or predators counted
+view(abpredation2isl)
+
+#count total replication after excluding necessary predator and habitat reps. 
+abpredation2islcount<-abpredation2 %>% 
+  filter(Island=="SNI"| Island=="SCI") %>% 
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") %>% 
+  filter(Site.name!="Boy Scout") %>% #Excluding boy scout because no habitat or predators were counted
+  filter(Exclude.predator!="yes") %>% 
+  filter(Exclude.habitat!="yes") %>% 
+  filter(!is.na(slope.of.bolt)) %>% 
+  filter(!is.na(Est....algal.cover..upright.algae.)) %>% 
+  group_by(Island, Site, Zone) %>% 
+  summarize(count=n())
+abpredation2islcount
+#should have 12 total rows, 4 are missing from SCI because of missing habitat and predator data.
+
+#selecting only columns that we need
+abpredation2islm<-abpredation2isl %>% 
+  select(Island, Site, Site.name, Zone, TransID, Predated.1, standardized.Rugosity.index..taught.rope...groovy.rope..transect.length..m.., rugosity.index.contoured.length.straight.length, X..pred.crabs, crabdensity, Exclude.predator, Crevice..1.0., slope.of.bolt, Est....algal.cover..upright.algae., Exclude.habitat)
+
+#choosing data types
+abpredation2islm$Island<-as.factor(abpredation2islm$Island)
+abpredation2islm$Site<-as.factor(abpredation2islm$Site)
+abpredation2islm$Zone<-as.factor(abpredation2islm$Zone)
+abpredation2islm$Predated.1<-as.numeric(abpredation2islm$Predated.1)
+abpredation2islm$standardized.Rugosity.index..taught.rope...groovy.rope..transect.length..m..<-as.numeric(abpredation2islm$standardized.Rugosity.index..taught.rope...groovy.rope..transect.length..m..)
+abpredation2islm$rugosity.index.contoured.length.straight.length <-  as.numeric(abpredation2islm$rugosity.index.contoured.length.straight.length)
+abpredation2islm$X..pred.crabs<-as.numeric(abpredation2islm$X..pred.crabs)
+abpredation2islm$crabdensity<-as.numeric(abpredation2islm$crabdensity)
+abpredation2islm$Crevice..1.0.<-as.numeric(abpredation2islm$Crevice..1.0.)
+abpredation2islm$slope.of.bolt<-as.numeric(abpredation2islm$slope.of.bolt)
+abpredation2islm$Est....algal.cover..upright.algae.<-as.numeric(abpredation2islm$Est....algal.cover..upright.algae.)
+
+#renaming columns
+colnames(abpredation2islm) <- c("Island", "Site", "Site_name", "Zone", "TransID", "Predated", "Rugosity", "Rugosity_index", "Crabs", "Density of Crabs", "Exclude.predator", "Crevice", "Boltslp", "Algalcov", "Exclude.habitat")
+view(abpredation2islm)
+
+#start building dataframe. First calculate proportion abalone predated again
+abpredationspacepropisl <- abpredationspaceprop %>% 
+  filter(`Site Name`!= "Boy Scout") %>% 
+  filter(Predated==1)
+view(abpredationspacepropisl)
+#this is the data frame that will be joined with the other variables. it does not calculate anything based on predator or habitat exclusions, only abalone exclusions
+
+#relabeling proportion data
+abpredationspacepropisl$Site <- factor(abpredationspacepropisl$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 1", "Site 2", "Site 3", "Site 4"), labels= c("1", "2", "3", "1", "2", "3", "4"))
+
+#relabeling predator and habitat data
+abpredation2islm$Site <- factor(abpredation2islm$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 1", "Site 2", "Site 3", "Site 4"), labels= c("1", "2", "3", "1", "2", "3", "4"))
+
+abpredation2islm$Island<- factor(abpredation2islm$Island, levels=c("SCI", "SNI"), labels = c("San Clemente Island", "San Nicolas Island"))
+
+abpredation2islm$Zone<- factor(abpredation2islm$Zone, levels=c("High", "Low"), labels = c("Mid", "Low"))
+view(abpredation2islm)
+
+#for each variable first calculate transect level values for predator and habitat characteristics so they can be joined with transect level proportions predated
+
+#Let's start with crabs. It calculates mean crab density only by excluding the bolts where predator counts weren't adequately sampled, but it does include reps where the abalone were excluded from proportion predated
+abpredation2islmcrab<-abpredation2islm %>% 
+  filter(!is.na(`Density of Crabs`)) %>%
+  filter(Exclude.predator!="yes") %>% 
+  group_by(Island, Site, Zone) %>% 
+  summarize(mean_crabdens=mean(`Density of Crabs`),
+            count=n(),
+            se_crabdens=sd(`Density of Crabs`)/sqrt(count)) 
+
+#merge the crab data frame with proportion predated
+df_mergedcrab <- abpredationspacepropisl %>%
+  filter(Predated==1) %>% 
+  left_join(abpredation2islmcrab, by = c("Island", "Site", "Zone"))
+df_mergedcrab
+
+##Now we add rugosity
+abpredation2islmrug<-abpredation2islm %>% 
+  filter(!is.na(Rugosity_index)) %>% 
+  filter(Exclude.habitat!="yes") %>% 
+  group_by(Island, Site, Zone) %>% 
+  summarize(rug=mean(Rugosity_index))
+abpredation2islmrug
+
+#join datasets still
+df_mergedrug<- df_mergedcrab %>% 
+  left_join(abpredation2islmrug, by = c("Island", "Site", "Zone"))
+df_mergedrug
+
+#calculate mean slope
+abpredation2islmslp<-abpredation2islm %>% 
+  filter(!is.na(Boltslp)) %>% 
+  filter(Exclude.habitat!="yes") %>% 
+  group_by(Island, Site, Zone) %>% 
+  summarize(slope=mean(Boltslp), 
+            countslp=n(),
+            se_slope=sd(Boltslp)/sqrt(countslp))
+abpredation2islmslp
+
+#merge datasets
+df_mergedslp<- df_mergedrug %>% 
+  left_join(abpredation2islmslp, by = c("Island", "Site", "Zone"))
+df_mergedslp
+
+#calculate mean percent. algal cover
+abpredation2islmalg<-abpredation2islm %>% 
+  filter(!is.na(Algalcov)) %>% 
+  filter(Exclude.habitat!="yes") %>% 
+  group_by(Island, Site, Zone) %>% 
+  summarize(alg=mean(Algalcov),
+            countalg=n(),
+            se_alg=sd(Algalcov)/sqrt(countalg)) %>% 
+  filter(Site!="SCI Site 2")
+abpredation2islmalg
+
+#merge datasets
+df_mergedalg<- df_mergedslp %>% 
+  left_join(abpredation2islmalg, by = c("Island", "Site", "Zone"))
+df_mergedalg
+
+#Calculate proportion of abalone with crevices present
+abpredation2islmcrev<-abpredation2islm %>% 
+  filter(!is.na(Crevice)) %>% 
+  filter(Exclude.habitat!="yes") %>% 
+  group_by(Island, Site, Zone, Crevice) %>% 
+  summarize(crev=n()) %>% 
+  mutate(prop_crev=crev/sum(crev))
+abpredation2islmcrev
+
+#merge datasets
+df_mergedtotal<- abpredation2islmcrev %>% 
+  filter(Crevice==1) %>% 
+  left_join(df_mergedalg, by = c("Island", "Site", "Zone"))
+df_mergedtotal
+
+#remove Terrace Canyon because it also does not have habitat data
+df_mergedtotal2 <- df_mergedtotal %>% 
+  filter(TransID!="TCH")
+df_mergedtotal2
+#should have 12 rows and counts next to each variable for how many reps are included in each metric
+
+#visualize effects of each variable on proportion predated
+
+#start with crab density. Two transects that will not be included in the model are shown for reference. They are not included in the model because we are only including sites for which we have data for all variables
+#based on the graph it looks like predation increases with crab density in general, but crab density also appears to vary by island. Those two variables look to 'covary'
+crabs_predationimg<- df_mergedcrab %>%
+ ggplot() +
+ aes(x = mean_crabdens, y = proportion_predated, color = Island) +
+ geom_jitter(size=3, width=0.02) +
+  scale_color_manual(values = c("San Clemente Island" = "#B22222", "San Nicolas Island" = "#4682B4"))+
+ geom_errorbarh(aes(xmin = mean_crabdens - se_crabdens, xmax = mean_crabdens + se_crabdens), height = 0.2) +
+ scale_fill_hue(direction = 1) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+ labs(x = expression(paste("Crab density (# per ", m^2, ")")), y = "Proportion predated") +
+ theme_bw() +
+ theme(plot.title = element_text(size = 14L, face="bold",
+    hjust = 0.5),
+    legend.position = c(0.85, 0.1),
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L),
+    legend.text = element_text(size = 9L),
+    legend.title = element_blank(),
+    axis.line = element_blank(),     # Remove axis lines
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank())
+crabs_predationimg
+
+#now we will look at rugosity. There are no error bars because rugosity was calculated for the entire transect so there is one value.
+#not a very strong pattern here
+rug_predationimg<- df_mergedrug %>%
+ ggplot() +
+ aes(x = rug, y = proportion_predated, color = Island) +
+ geom_jitter(size=3, width=0.02) +
+  scale_color_manual(values = c("San Clemente Island" = "#B22222", "San Nicolas Island" = "#4682B4"))+
+ scale_fill_hue(direction = 1) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+ labs(x = expression(paste("Rugosity index"), y = "Proportion predated")) +
+ theme_bw() +
+ theme(plot.title = element_text(size = 14L, face="bold",
+    hjust = 0.5),
+    legend.position = c(0.85, 0.1),
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L),
+    legend.text = element_text(size = 9L),
+    legend.title = element_blank(),
+    axis.line = element_blank(),     # Remove axis lines
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank())
+rug_predationimg
+
+#now we will look at slope. 
+#seeing a somewhat similar pattern as crab density here in terms of it potentially covarying with island
+slp_predationimg<- df_mergedslp %>%
+ ggplot() +
+ aes(x = slope, y = proportion_predated, color = Island) +
+ geom_jitter(size=3, width=0.02) +
+  scale_color_manual(values = c("San Clemente Island" = "#B22222", "San Nicolas Island" = "#4682B4"))+
+  geom_errorbarh(aes(xmin = slope - se_slope, xmax = slope + se_slope), height = 0.2) +
+ scale_fill_hue(direction = 1) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+ labs(x = expression(paste("Slope (",degree,")")), y = "Proportion predated") +
+ theme_bw() +
+ theme(plot.title = element_text(size = 14L, face="bold",
+    hjust = 0.5),
+    legend.position = c(0.85, 0.1),
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L),
+    legend.text = element_text(size = 9L),
+    legend.title = element_blank(),
+    axis.line = element_blank(),     # Remove axis lines
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank())
+slp_predationimg
+
+#now we will look at algal cover. 
+#should be 4 on SCI
+alg_predationimg<- df_mergedalg %>%
+ ggplot() +
+ aes(x = alg, y = proportion_predated, color = Island) +
+ geom_jitter(size=3, width=0.02) +
+  scale_color_manual(values = c("San Clemente Island" = "#B22222", "San Nicolas Island" = "#4682B4"))+
+  geom_errorbarh(aes(xmin = alg - se_alg, xmax = alg + se_alg), height = 0.2) +
+ scale_fill_hue(direction = 1) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+ labs(x = expression(paste("Algal cover (%)")), y = "Proportion predated") +
+ theme_bw() +
+ theme(plot.title = element_text(size = 14L, face="bold",
+    hjust = 0.5),
+    legend.position = c(0.85, 0.1),
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L),
+    legend.text = element_text(size = 9L),
+    legend.title = element_blank(),
+    axis.line = element_blank(),     # Remove axis lines
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank())
+alg_predationimg
+
+#now we will do crevice prevalence. Should not be error bars. 
+crev_predationimg<- df_mergedtotal %>%
+ ggplot() +
+ aes(x = prop_crev, y = proportion_predated, color = Island) +
+ geom_jitter(size=3, width=0.02) +
+  scale_color_manual(values = c("San Clemente Island" = "#B22222", "San Nicolas Island" = "#4682B4"))+
+ scale_fill_hue(direction = 1) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+ labs(x = expression(paste("Crevice presence")), y = "Proportion predated") +
+ theme_bw() +
+ theme(plot.title = element_text(size = 14L, face="bold",
+    hjust = 0.5),
+    legend.position = c(0.80, 0.1),
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L),
+    legend.text = element_text(size = 9L),
+    legend.title = element_blank(),
+    axis.line = element_blank(),     # Remove axis lines
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank())
+crev_predationimg
+
+
+```
+
+###Predator density + habitat characteristics analysis
+```{r}
+#include island in this full model because we know it is an important factor
+#make sure we have no NAs
+df_mergedtotal_filtered <- df_mergedtotal2 %>% 
+  filter(!is.na(alg)) %>% 
+  filter(!is.na(slope))
+df_mergedtotal_filtered
+
+#we are adding terms to our first model: crab density, rugosity, slope, algal cover, crevice prevalence. We are adding these terms to the known important Island factor. Nothing else has changed besides the terms and the replication is now 12 instead of 16 because sites that did not record these extra variables were not included. 
+
+#model step 1
+ab_binomial_habpredreg <- glm(formula = cbind(Count, deployed - Count) ~ Island + mean_crabdens + rug + slope + alg + prop_crev, binomial(logit), data = df_mergedtotal_filtered)
+
+summary(ab_binomial_habpredreg) 
+summ(ab_binomial_habpredreg)
+drop1(ab_binomial_habpredreg)
+
+# Island appears to remain the only significant factor in the model. The model appears to be good based on the dramatic decrease from null to residual deviance. We will now go through a backwards elimination process and eliminate terms that result in models with the lowest AIC. Looks like removing alg is the way to go. 
+
+#model step 2
+ab_binomial_habpred2 <- glm(formula = cbind(Count, deployed - Count) ~ Island + mean_crabdens + rug + slope + prop_crev, binomial(logit), data = df_mergedtotal_filtered)
+summary(ab_binomial_habpred2)
+summ(ab_binomial_habpred2)
+drop1(ab_binomial_habpred2)
+#dropping rugosity would result in the next lowest AIC
+
+#model step 3
+ab_binomial_habpred3 <- glm(formula = cbind(Count, deployed - Count) ~ Island + mean_crabdens + slope + prop_crev, binomial(logit), data = df_mergedtotal_filtered)
+summary(ab_binomial_habpred3)
+summ(ab_binomial_habpred3)
+drop1(ab_binomial_habpred3)
+#dropping crevice would be the next lowest AIC
+
+#model step 4 
+ab_binomial_habpred4 <- glm(formula = cbind(Count, deployed - Count) ~ Island + mean_crabdens + slope, binomial(logit), data = df_mergedtotal_filtered)
+summary(ab_binomial_habpred4)
+summ(ab_binomial_habpred4)
+drop1(ab_binomial_habpred4) 
+#dropping crab density would be the next lowest AIC
+
+#model step 5
+ab_binomial_habpred5 <- glm(formula = cbind(Count, deployed - Count) ~ Island + slope, binomial(logit), data = df_mergedtotal_filtered)
+summary(ab_binomial_habpred5)
+summ(ab_binomial_habpred5)
+drop1(ab_binomial_habpred5)
+#dropping or leaving in slope results in essentially the same AIC
+
+#model step 6 
+ab_binomial_habpredfinal <- glm(formula = cbind(Count, deployed - Count) ~ Island, binomial(logit), data = df_mergedtotal_filtered)
+summary(ab_binomial_habpredfinal)
+summ(ab_binomial_habpredfinal)
+drop1(ab_binomial_habpredfinal)
+anova(ab_binomial_habpredfinal)
+#now with the final model including just Island, it remains the most significant factor for the model fit. ANOVA confirms that Island again has a significant effect on proportion predated
+
+resid_dev4 <- deviance(ab_binomial_habpredfinal)
+resid_df4 <- df.residual(ab_binomial_habpredfinal)
+overdispersion4 <- resid_dev4 / resid_df4
+overdispersion4
+#not overdispersed, a little underdispersed
+
+#check residuals
+par(mfrow = c(2, 2))
+plot(ab_binomial_habpredfinal)
+#looks okay. 
+```
+##Pred and Hab variables by Island
+### Crab density by Island analysis
+```{r}
+#although crab density did not have an effect on proportion predated, it did appear to differ by Island. We will test for this difference using a two-sample t test. Here we should have 6 transects from San Clemente and 8 transects from San Nicolas Island. We have included 2 transects from SCI Site 2 here that were not included in the GLM. 
+
+ggplot(df_mergedcrab, aes(x = factor(Island), y = mean_crabdens)) +
+    geom_boxplot() +
+    labs(x = "Island", y = "Mean Crab Density") +
+    theme_minimal()
+
+#calculates mean crab density per region
+meansdcrab<-df_mergedcrab %>% 
+  group_by(Island) %>% 
+  summarize(meancrab = mean(mean_crabdens), 
+            count=n(),
+            se_crab=sd(mean_crabdens)/sqrt(count))
+meansdcrab
+
+#check for normality. 
+#Shapiro wilks test proclaims it is normal in both groups. QQ plots look okay despite the low sample size. 
+shapiro.test(df_mergedcrab$mean_crabdens[df_mergedcrab$Island=="San Clemente Island"])
+shapiro.test(df_mergedcrab$mean_crabdens[df_mergedcrab$Island=="San Nicolas Island"])
+
+qqnorm(df_mergedcrab$mean_crabdens[df_mergedcrab$Island == "San Clemente Island"])
+qqline(df_mergedcrab$mean_crabdens[df_mergedcrab$Island == "San Clemente Island"], col = "red")
+
+qqnorm(df_mergedtotal$mean_crabdens[df_mergedtotal$Island == "San Nicolas Island"])
+qqline(df_mergedtotal$mean_crabdens[df_mergedtotal$Island == "San Nicolas Island"], col = "red")
+
+#Check for heteroscedasticity. Not heteroscedastic 
+leveneTest(mean_crabdens ~ Island, data = df_mergedcrab)
+
+#H0: Crab density does not differ by Island
+#HA: Crab density does differ by Island
+
+t.test(mean_crabdens ~ Island, data = df_mergedcrab, var.equal = TRUE)
+#p=0.006, so we can reject the null hypothesis, meaning crab density does differ by island.
+```
+### Slope by Island analysis
+```{r}
+#although slope did not have an effect on proportion predated, it did appear to differ by Island. We will test for this difference using a two-sample t test. Here we should have 5 transects from San Clemente and 8 transects from San Nicolas Island. We have included 1 transect from SCI Site 2 here that was not included in the GLM. 
+
+ggplot(df_mergedslp, aes(x = factor(Island), y = slope)) +
+    geom_boxplot() +
+    labs(x = "Island", y = "Slope") +
+    theme_minimal()
+
+meansdslope<-df_mergedslp %>% 
+  group_by(Island) %>% 
+  filter(!is.na(slope)) %>% 
+  summarize(meanslp = mean(slope), 
+            count=n(),
+            se_slp=sd(slope)/sqrt(count))
+meansdslope
+
+#Shapiro wilks test proclaims it is normal in both groups
+shapiro.test(df_mergedslp$slope[df_mergedslp$Island=="San Clemente Island"])
+shapiro.test(df_mergedslp$slope[df_mergedtotal$Island=="San Nicolas Island"])
+
+qqnorm(df_mergedslp$slope[df_mergedslp$Island == "San Clemente Island"])
+qqline(df_mergedslp$slope[df_mergedslp$Island == "San Clemente Island"], col = "red")
+
+qqnorm(df_mergedslp$slope[df_mergedslp$Island == "San Nicolas Island"])
+qqline(df_mergedslp$slope[df_mergedslp$Island == "San Nicolas Island"], col = "red")
+
+#data is not heteroscedastic
+leveneTest(slope ~ Island, data = df_mergedslp)
+
+#H0: Slope does not differ by Island
+#HA: Slope does differ by Island
+
+t.test(slope ~ Island, data = df_mergedslp, var.equal = TRUE)
+#p=0.02, so we reject the null hypothesis, slope does differ
+```
+### Rugosity by Island analysis
+```{r}
+#although we did not see patterns with rugosity and predation, we will check if rugosity differs by island here just in case. Here we should have 5 transects from San Clemente and 8 transects from San Nicolas Island. We have included 1 transect from SCI Site 2 here that was not included in the GLM.
+
+ggplot(df_mergedtotal, aes(x = factor(Island), y = rug)) +
+    geom_boxplot() +
+    labs(x = "Island", y = "Rugosity") +
+    theme_minimal()
+
+meansdrug<-df_mergedrug %>% 
+  group_by(Island) %>% 
+  filter(!is.na(rug)) %>% 
+  summarize(meanrug = mean(rug), 
+            count=n(),
+            se_rug=sd(rug)/sqrt(count))
+meansdrug
+
+#check for normality
+#Shapiro wilks test proclaims it is normal in both groups
+shapiro.test(df_mergedrug$rug[df_mergedrug$Island=="San Clemente Island"])
+shapiro.test(df_mergedrug$rug[df_mergedrug$Island=="San Nicolas Island"])
+
+qqnorm(df_mergedrug$rug[df_mergedrug$Island == "San Clemente Island"])
+qqline(df_mergedrug$rug[df_mergedrug$Island == "San Clemente Island"], col = "red")
+
+qqnorm(df_mergedrug$rug[df_mergedrug$Island == "San Nicolas Island"])
+qqline(df_mergedrug$rug[df_mergedrug$Island == "San Nicolas Island"], col = "red")
+
+#not heteroscedastic 
+leveneTest(rug ~ Island, data = df_mergedrug)
+
+#H0: Rugosity does not differ by Island
+#HA: Rugosity does differ by Island
+
+t.test(rug ~ Island, data = df_mergedrug, var.equal = TRUE)
+#p=0.16, we do not reject the null, rugosity is not different
+```
+### Algal cover by Island analysis
+```{r}
+#although we did not see patterns with algal cover and predation, we will check if algal cover differs by island here just in case. 
+
+ggplot(df_mergedalg, aes(x = factor(Island), y = alg)) +
+    geom_boxplot() +
+    labs(x = "Island", y = "Algal cover (%)") +
+    theme_minimal()
+df_mergedalg
+
+meansdalg<-df_mergedalg %>% 
+  group_by(Island) %>% 
+  filter(!is.na(alg)) %>% 
+  summarize(meanalg = mean(alg), 
+            count=n(),
+            se_alg=sd(alg)/sqrt(count))
+meansdalg
+
+#check for normality
+#Shapiro wilks test proclaims it not super normal in both groups
+shapiro.test(df_mergedalg$alg[df_mergedalg$Island=="San Clemente Island"])
+shapiro.test(df_mergedalg$alg[df_mergedalg$Island=="San Nicolas Island"])
+
+qqnorm(df_mergedalg$alg[df_mergedalg$Island == "San Clemente Island"])
+qqline(df_mergedalg$alg[df_mergedalg$Island == "San Clemente Island"], col = "red")
+
+qqnorm(df_mergedalg$alg[df_mergedalg$Island == "San Nicolas Island"])
+qqline(df_mergedalg$alg[df_mergedalg$Island == "San Nicolas Island"], col = "red")
+
+#not heteroscedastic 
+leveneTest(alg ~ Island, data = df_mergedalg)
+
+#H0: Algal cover does not differ by Island
+#HA: Algal cover does differ by Island
+
+#we will do a wilcoxon rank sum test because the data is not normal
+wilcox.test(alg ~ Island, data = df_mergedalg)
+#p=0.57, we do not reject the null hypothesis, algal cover does not differ
+```
+### Proportion Crevice present by Island analysis
+```{r}
+#although we did not see patterns with crevices and predation, we will check if crevice prevalence differs by island here just in case. Here we should have 5 transects from San Clemente and 8 transects from San Nicolas Island. We have included 1 transect from SCI Site 2 here that was not included in the GLM.
+
+ggplot(df_mergedtotal, aes(x = factor(Island), y = prop_crev)) +
+    geom_boxplot() +
+    labs(x = "Island", y = "Crevice prevalence") +
+    theme_minimal()
+df_mergedtotal
+
+meansdcrev<-df_mergedtotal %>% 
+  group_by(Island) %>% 
+  filter(!is.na(prop_crev)) %>% 
+  summarize(meancrev = mean(prop_crev), 
+            count=n(),
+            se_crev=sd(prop_crev)/sqrt(count))
+meansdcrev
+
+#check for normality
+#Shapiro wilks test proclaims it not super normal
+shapiro.test(df_mergedtotal$prop_crev[df_mergedtotal$Island=="San Clemente Island"])
+shapiro.test(df_mergedtotal$prop_crev[df_mergedtotal$Island=="San Nicolas Island"])
+
+qqnorm(df_mergedtotal$prop_crev[df_mergedtotal$Island == "San Clemente Island"])
+qqline(df_mergedtotal$prop_crev[df_mergedtotal$Island == "San Clemente Island"], col = "red")
+
+qqnorm(df_mergedtotal$prop_crev[df_mergedtotal$Island == "San Nicolas Island"])
+qqline(df_mergedtotal$prop_crev[df_mergedtotal$Island == "San Nicolas Island"], col = "red")
+
+#not heteroscedastic, but borderline
+leveneTest(prop_crev ~ Island, data = df_mergedtotal)
+
+#H0: Crevice prevalence does not differ by Island
+#HA: Crevice prevalence does differ by Island
+
+#we will do a wilcoxon rank sum test because the data is not normal
+wilcox.test(prop_crev ~ Island, data = df_mergedtotal)
+#p=0.12, we do not reject the null hypothesis, crevice prevalence does not differ
+```
+##Lab tethering
+###Shell remain in lab
+```{r}
+labteth<-read.csv("Labtethering_juv_abalone_predation1.csv",header=T)
+view(labteth) #visualize the data frame
+str(labteth)
+labteth$Start.Date<- as.factor(labteth$Start.Date)
+
+#how many crabs and octopus ate per trial. 
+labtethpred <-labteth %>%  #filter out any rows where Predated = NA
+  filter(Predator.type!="control") %>% 
+  group_by(Start.Date, Predator.type, Predated) %>% # group by the categories in predator type and shell damage
+  summarize(count = n()) %>% #counts the number of observations per grouping
+  mutate(proportion_eaten = count / sum(count)) 
+labtethpred
+
+labteth1<- labteth %>% 
+  filter(Octopus.name !="feta") %>% 
+  filter(Octopus.name != "colby") %>%  
+  filter(Octopus.name !="rigatoni") %>% 
+  group_by(Predator.type) %>% 
+  summarize(count=n())
+labteth1
+
+#how many trials did each octopus undergo?
+labteth2<- labteth %>% 
+  filter(Predator.type=="octopus") %>% 
+  filter(Octopus.name !="feta") %>% 
+  filter(Octopus.name != "colby") %>%  
+  filter(Octopus.name !="rigatoni") %>% 
+  group_by(Octopus.name) %>% 
+  summarize(count=n())
+labteth2
+
+#did octopus repeat eat? No they did not, so we do not have to worry about repeated measures.
+labtethoct <-labteth %>%  #filter out any rows where Predated = NA
+  filter(Predator.type!="control") %>% 
+  filter(Predator.type=="octopus") %>% 
+  group_by(Octopus.name, Predated) %>% # group by the categories in predator type and shell damage
+  summarize(count = n()) 
+labtethoct
+```
+
+###Shell remain in lab analysis
+```{r}
+labtethproptotal <-labteth %>%  #filter out any rows where Predated = NA
+  filter(Predator.type!="control") %>% 
+  filter(Predated=="Y") %>% 
+  group_by(Predator.type, Shell.Damage.1) %>% # group by the categories in predator type and shell damage
+  summarize(count = n()) %>% #counts the number of observations per grouping
+  mutate(proportion_shelldamage = count / sum(count), 
+        total_pred=sum(count))# adds a column of the proportion of shell damage out of crab and octopus predation
+labtethproptotal
+
+labtethproptotal$Predator.type<-as.factor(labtethproptotal$Predator.type)
+labtethproptotal$Shell.Damage.1<-as.factor(labtethproptotal$Shell.Damage.1)
+labtethproptotal
+labtethproptotal$Predator.type<-factor(labtethproptotal$Predator.type, levels = c("crab", "octopus"), labels=c("Striped Shore Crab", "CA Two Spot Octopus"))
+labtethproptotal$Shell.Damage.1<-factor(labtethproptotal$Shell.Damage.1, levels = c("tissue missing + no damage", "tissue missing + shell damage", "shell missing"), labels=c("Intact", "Damaged", "Missing"))
+newrow1a<- data.frame(Predator.type = "Striped Shore Crab", Shell.Damage.1="Missing", count=0, proportion_shelldamage=0, total_pred=10)
+newrow1b<- data.frame(Predator.type = "CA Two Spot Octopus", Shell.Damage.1="Damaged", count=0, proportion_shelldamage=0, total_pred=6)
+labtethproptotal<- rbind(labtethproptotal, newrow1b, newrow1a)
+view(labtethproptotal)
+#this is a data frame for reference
+
+#visualize the data
+Propshellremain_lab <- labtethproptotal %>% 
+ ggplot() +
+  aes(x = Predator.type, y = proportion_shelldamage, fill = Shell.Damage.1) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "#228B22", "Missing" = "#0C4C8A", "Damaged"= "#EF562D")) +
+  labs(
+    x = "Predator",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) 
+Propshellremain_lab
+
+
+#we will now make a contingency table in the format needed for chi-square tests. We are using a chi-square because we have two categorical variables, predator species and shell remain type, and then counts within each of those category combinations
+
+labtethchi<- labteth %>% 
+    filter(Predator.type!="control") %>% 
+  filter(Predated=="Y")
+
+labtethchi$Predator.type<-factor(labtethchi$Predator.type, levels = c("crab", "octopus"), labels=c("Striped Shore Crab", "CA Two Spot Octopus"))
+labtethchi$Shell.Damage.1<-factor(labtethchi$Shell.Damage.1, levels = c("tissue missing + no damage", "shell missing", "tissue missing + shell damage"), labels=c("Intact", "Missing", "Damaged"))
+view(labtethchi)
+labtethproptotal
+
+#here is the table
+tablepredshell <- table(labtethchi$Predator.type, labtethchi$Shell.Damage.1)
+tablepredshell
+sum(tablepredshell) #16 total predation events, 10 for crabs, 6 for octopus
+# Run a chi-square test
+
+#H0: Shell remain does not depend on Predator species
+#HA: Shell remain does depend on Predator species
+
+chisq.test(tablepredshell) #can't do chi-square because some expected frequencies are less than 5 or around 0
+fisher.test(tablepredshell)
+#p=0.01324, we reject the null hypothesis, shell remain type and predator species are associated
+
+#lets do some post-hoc tests 
+# Shell Intact vs Shell Missing
+table_intact_missinglab <- tablepredshell[, c("Intact", "Missing")]
+table_intact_missinglab
+sum(table_intact_missinglab)
+
+# Shell Intact vs Shell Damaged
+table_intact_damagedlab <- tablepredshell[, c("Intact", "Damaged")]
+table_intact_damagedlab
+
+# Shell Missing vs Shell Damaged
+table_missing_damagedlab <- tablepredshell[, c("Missing", "Damaged")]
+table_missing_damagedlab
+
+# Chi-square test for Shell Intact vs Shell Missing
+fish_intact_missinglab <- fisher.test(table_intact_missinglab)
+fish_intact_missinglab 
+#p=0.014 which is good 
+
+# Chi-square test for Shell Intact vs Shell Damaged
+fish_intact_damagedlab <- fisher.test(table_intact_damagedlab)
+fish_intact_damagedlab
+
+# Chi-square test for Shell Missing vs Shell Damaged
+fish_missing_damagedlab <- fisher.test(table_missing_damagedlab)
+fish_missing_damagedlab
+
+alpha_correctedlab <- 0.05 / 3
+alpha_correctedlab
+
+# Print p-values
+fish_intact_missinglab$p.value
+fish_intact_damagedlab$p.value
+fish_missing_damagedlab$p.value
+
+# Compare p-values with corrected alpha
+p_valueslab <- c(fish_intact_missinglab$p.value, fish_intact_damagedlab$p.value, fish_missing_damagedlab$p.value)
+
+# Check if any of them are significant with the Bonferroni correction
+significant <- p_valueslab < alpha_correctedlab
+significant 
+
+#we had to make a bonferroni correction to the p-value due to multiple pairwise comparisons. 
+#based on these results, only intact and missing shells differ, so this difference is likely what is driving the overall association
+```
+##Shell remain type in field
+```{r}
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv", header=T)
+
+abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
+#excludes any blanks or NAs where island is not displayed
+view(abpredation)
+
+#exclude any irrelevant columns, filter out controls + nas
+abpredation2 <- abpredation %>% 
+  select(-c(8:9, 21, 23:40)) %>% 
+  filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") 
+view(abpredation2)
+
+abpredationshell<-abpredation2 %>%  
+  filter(!is.na(Predated)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") %>%  #filter out controls
+  filter(Exclude.analysis1!="Yes") %>% #filter out reps we are excluding, same as first analysis
+  filter(Predated.1==1)
+view(abpredationshell)
+
+#creating a dataframe that shows proportion predated and not predated for each zone within each site
+abpredationshellprop<-abpredationshell %>%
+  filter(Shell_status != "Tissue missing + drilled") %>% 
+  group_by(Island, Site, Zone, TransID, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellremain = count/sum(count),
+         total_pred=sum(count)) 
+abpredationshellprop
+
+#count total shell remain in each category
+abpredationshelltotal<-abpredationshell %>%
+  group_by(Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellremain = count/sum(count),
+         total_pred=sum(count)) 
+abpredationshelltotal
+
+#add rows with zeros 
+abpredationshellprop$Shell_status <- as.factor(abpredationshellprop$Shell_status)
+newrow2a<- data.frame(Island = "SCI", Site = "Site 3", Zone = "High", TransID="WCH", Shell_status="Shell missing", count = 0, proportion_shellremain=0, total_pred=12)
+newrow2b<- data.frame(Island = "SNI", Site = "Site 1", Zone = "Low", TransID="CL", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=5)
+newrow2ba<- data.frame(Island = "SNI", Site = "Site 1", Zone = "High", TransID="CH", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=7)
+newrow2c<- data.frame(Island = "SNI", Site = "Site 4", Zone = "High", TransID="DBH", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=2)
+newrow2d<- data.frame(Island = "SNI", Site = "Site 4", Zone = "High", TransID="DBL", Shell_status="Shell missing", count = 0, proportion_shellremain=0, total_pred=2)
+newrow2e<- data.frame(Island = "SNI", Site = "Site 4", Zone = "Low", TransID="DBL", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=5)
+newrow2f<- data.frame(Island = "SNI", Site = "Site 2", Zone = "Low", TransID="REL", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=3)
+newrow2fa<- data.frame(Island = "SNI", Site = "Site 2", Zone = "High", TransID="REL", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=5)
+newrow2g<- data.frame(Island = "SNI", Site = "Site 3", Zone = "High", TransID="TBH", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=3)
+newrow2h<- data.frame(Island = "SNI", Site = "Site 3", Zone = "Low", TransID="TBH", Shell_status="Tissue missing + shell damage", count = 0, proportion_shellremain=0, total_pred=5)
+
+abpredationshellprop1<-rbind(abpredationshellprop, newrow2a, newrow2b, newrow2c, newrow2d, newrow2e, newrow2f, newrow2g, newrow2h, newrow2ba, newrow2fa)
+abpredationshellprop1
+
+#makes sure each column is categorized correctly
+abpredationshellprop1$Zone<-as.factor(abpredationshellprop1$Zone)
+abpredationshellprop1$Site<-as.factor(abpredationshellprop1$Site)
+abpredationshellprop1$Island<-as.factor(abpredationshellprop1$Island)
+
+#change labels
+abpredationshellprop1$Zone <- factor(abpredationshellprop1$Zone, levels= c("High","Low"), labels=c("Mid", "Low"))
+
+abpredationshellprop1$Island<- factor(abpredationshellprop1$Island, levels=c("SCI", "SNI"), labels = c("San Clemente Island", "San Nicolas Island"))
+
+abpredationshellprop1$Shell_status<- factor(abpredationshellprop1$Shell_status, levels=c("Tissue missing", "Shell missing", "Tissue missing + shell damage"), labels = c("Intact", "Missing", "Damaged"))
+
+colnames(abpredationshellprop1) <- c("Island", "Site", "Zone", "TransID", "Shell_Remain_Type", "Count", "proportion_shellremain", "total_predated")
+
+abpredationshellprop1 <- abpredationshellprop1 %>% 
+  filter(!is.na(Shell_Remain_Type))
+abpredationshellprop1
+view(abpredationshellprop1)
+
+#look at data on SCI
+Prop_predation_shellsci <- abpredationshellprop1 %>%
+  filter(Island %in% "San Clemente Island") %>%
+ ggplot() +
+  aes(x = Zone, y = proportion_shellremain, fill = Shell_Remain_Type) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "#228B22", "Missing" = "#0C4C8A", "Damaged"= "#EF562D")) +
+  labs(
+    x = "Zone",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5,
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) +
+  facet_grid(.~Site)
+Prop_predation_shellsci
+
+#view data on SCI
+Prop_predation_shellsni <- abpredationshellprop1 %>%
+   filter(Island %in% "San Nicolas Island") %>%
+ ggplot() +
+  aes(x = Zone, y = proportion_shellremain, fill = Shell_Remain_Type) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "#228B22", "Missing" = "#0C4C8A", "Damaged"= "#EF562D")) +
+  labs(
+    x = "Zone",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5,
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, angle= 0, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) +
+  facet_grid(.~Site)
+Prop_predation_shellsni
+```
+
+###Shell remain by Zone analysis
+```{r}
+#like the lab tethering analysis, we will use chi-square tests here, as we have the same categorical response variable of shell remains. This time, instead of predator species as the other categorical variable, it is a spatial variable, either zone, island, or site within island.
+
+abpredationshellchi<-abpredation2 %>%  
+  filter(!is.na(Predated)) %>% #filter out any rows where Predated = NA
+  filter(Control=="Not control") %>%  #filter out controls
+  filter(Exclude.analysis1!="Yes") %>% #filter out reps we are excluding
+  filter(Predated.1==1) %>% 
+  filter(Shell_status!="Tissue missing + drilled") 
+abpredationshellchi
+
+#makes sure each column is categorized correctly
+abpredationshellchi$Zone<-as.factor(abpredationshellchi$Zone)
+abpredationshellchi$Site<-as.factor(abpredationshellchi$Site)
+abpredationshellchi$Island<-as.factor(abpredationshellchi$Island)
+abpredationshellchi$Shell_status <- as.factor(abpredationshellchi$Shell_status)
+levels(abpredationshellchi$Shell_status)
+
+abpredationshellchi$Zone <- factor(abpredationshellchi$Zone, levels= c("High","Low"), labels=c("Mid", "Low"))
+
+abpredationshellchi$Shell_status<- factor(abpredationshellchi$Shell_status, levels=c("Tissue missing", "Shell missing", "Tissue missing + shell damage"), labels = c("Shell Intact", "Shell Missing", "Shell Damaged"))
+abpredationshellchi
+
+
+tablezoneshell <- table(abpredationshellchi$Zone, abpredationshellchi$Shell_status)
+tablezoneshell
+sum(tablezoneshell)
+
+# Run a chi-square test
+chisqzone<- chisq.test(tablezoneshell)
+chisqzone
+#p=0.0013, we reject the null, shell remain does depend on zone
+
+#create a data frame to visualize data
+abshellpropzone <- abpredationshellchi %>% 
+  group_by(Zone, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellzone = count/sum(count),
+         total_predzone=sum(count))
+abshellpropzone
+
+#visualize shell remain by zone
+Propshellzoneimg <-  abshellpropzone %>%
+ggplot() +
+  aes(x = Zone, y = proportion_shellzone, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.2)) +
+  scale_fill_manual(values = c("Shell Intact" = "#228B22", "Shell Missing" = "#0C4C8A", "Shell Damaged"= "#EF562D")) +
+  labs(
+    x = "Zone",
+    y = "Proportion Shell Remain",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) 
+Propshellzoneimg
+
+#another way to look at it
+abpredationshellprop1
+abshellmeansd<-abpredationshellprop1 %>% 
+  group_by(Zone, Shell_Remain_Type) %>% 
+  summarize(mean_shellprop=mean(proportion_shellremain),
+            count=n(),
+            se_shellprop=sd(proportion_shellremain)/sqrt(count))
+abshellmeansd
+
+Prop_shell_zoneimg <- abshellmeansd %>%
+ ggplot() +
+  aes(x = Shell_Remain_Type, y = mean_shellprop) +
+  geom_bar(stat = "identity", position="dodge")+
+geom_errorbar(aes(ymin = mean_shellprop - se_shellprop, ymax = mean_shellprop + se_shellprop), color="black", width = 0.2)+
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c()) +
+  labs(
+    x = "Zone",
+    y = "Mean Proportion Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, angle = 0),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 12)
+  )+
+  facet_grid(.~Zone, scales = "free_x", space="free_x")
+Prop_shell_zoneimg
+
+#post hoc tests
+
+#create contingency tables
+# Shell Intact vs Shell Missing
+table_intact_missing <- tablezoneshell[, c("Shell Intact", "Shell Missing")]
+table_intact_missing
+
+# Shell Intact vs Shell Damaged
+table_intact_damaged <- tablezoneshell[, c("Shell Intact", "Shell Damaged")]
+table_intact_damaged
+
+# Shell Missing vs Shell Damaged
+table_missing_damaged <- tablezoneshell[, c("Shell Missing", "Shell Damaged")]
+table_missing_damaged
+
+# Chi-square test for Shell Intact vs Shell Missing
+chisq_intact_missing <- chisq.test(table_intact_missing)
+chisq_intact_missing
+sum(table_intact_missing)
+
+# Chi-square test for Shell Intact vs Shell Damaged
+chisq_intact_damaged <- chisq.test(table_intact_damaged)
+chisq_intact_damaged
+
+# Chi-square test for Shell Missing vs Shell Damaged
+chisq_missing_damaged <- chisq.test(table_missing_damaged)
+chisq_missing_damaged
+
+alpha_corrected <- 0.05 / 3
+alpha_corrected
+
+# Print p-values
+chisq_intact_missing$p.value
+chisq_intact_damaged$p.value
+chisq_missing_damaged$p.value
+#shell intact vs. missing is only significant difference, p=0.0005, so this is driving the zone and shell dependence.
+
+#nothing is different than the shell damaged category. But the proportion of shells missing and shells left intact out of all predated shells is different depending on the zone. From the graph, it seems like the proportion of missing shells is higher in the low zone than the mid, and the proportion of intact shells is more prominent in the mid zone. 
+
+```
+
+### Shell remains by Island analysis
+```{r}
+#create a contingency table of shell remain by Island
+tableregionshell <- table(abpredationshellchi$Island, abpredationshellchi$Shell_status)
+tableregionshell
+# Run a chi-square test
+chisq.test(tableregionshell)
+sum(tableregionshell)
+#shell remain is dependent on island, p=0.0018
+
+#create dataframe for visualizing data
+abshellpropisland <- abpredationshellchi %>% 
+  group_by(Island, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellisland = count/sum(count),
+         total_predisland=sum(count))
+abshellpropisland
+
+newrowx<- data.frame(Island = "SNI", Shell_status="Shell Damaged", count = 0, proportion_shellisland=0, total_predisland=35)
+abshellpropisland<-rbind(abshellpropisland, newrowx)
+abshellpropisland
+
+#visualize shell remain by island
+Propshellislandimg <- abshellpropisland %>%
+ ggplot() +
+  aes(x = Island, y = proportion_shellisland, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.2)) +
+  scale_fill_manual(values = c("Shell Intact" = "#228B22", "Shell Missing" = "#0C4C8A", "Shell Damaged"= "#EF562D")) +
+  labs(
+    x = "Island",
+    y = "Proportion Shell Remain",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) 
+Propshellislandimg
+
+abshellregmeansd<-abpredationshellprop1 %>% 
+  group_by(Island, Shell_Remain_Type) %>% 
+  summarize(mean_shellpropisland=mean(proportion_shellremain),
+            count=n(),
+            se_shellpropisland=sd(proportion_shellremain)/sqrt(count))
+abshellregmeansd
+
+#another way to visualize
+Prop_shell_islandimg <- abshellregmeansd %>%
+ ggplot() +
+  aes(x = Shell_Remain_Type, y = mean_shellpropisland) +
+  geom_bar(stat = "identity", position="dodge")+
+geom_errorbar(aes(ymin = mean_shellpropisland - se_shellpropisland, ymax = mean_shellpropisland + se_shellpropisland), color="black", width = 0.2)+
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c()) +
+  labs(
+    x = "Island",
+    y = "Mean Proportion Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, angle = 0),
+    legend.text = element_text(size = 12L),
+    legend.title = element_text(size = 12L),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 12)
+  )+
+  facet_grid(.~Island, scales = "free_x", space="free_x")
+Prop_shell_islandimg
+
+#post hocs
+
+# San Clemente vs San Nicolas Island & Shell Intact and Shell missing
+test_sci_sni_int_miss <- chisq.test(tableregionshell[c("SCI", "SNI"), c("Shell Intact", "Shell Missing")])
+test_sci_sni_int_miss
+
+# San Clemente vs San Nicolas Island & Shell Intact and Shell Damaged
+test_sci_sni_int_dam <- chisq.test(tableregionshell[c("SCI", "SNI"), c("Shell Intact", "Shell Damaged")])
+test_sci_sni_int_dam
+
+# San Nicolas vs San Clemente Island & Shell Missing and Shell Damaged
+test_sni_sci_miss_dam <- chisq.test(tableregionshell[c("SNI", "SCI"), c("Shell Missing", "Shell Damaged")])
+test_sni_sci_miss_dam
+#use fisher
+test_sni_sci_miss_dam2 <- fisher.test(tableregionshell[c("SNI", "SCI"), c("Shell Missing", "Shell Damaged")])
+test_sni_sci_miss_dam2
+
+alpha_corrected <- 0.05 / 3
+alpha_corrected
+
+# p=0.002,Shell intact and Shell damaged are different between SCI and SNI. This is because there is no damage on SNI.
+```
+
+### Shell remain by site on SNI
+```{r}
+abpredationshellchiSNI <- abpredationshellchi %>% 
+  filter( Island =="SNI")
+abpredationshellchiSNI
+
+abshellpropsni <- abpredationshellchiSNI %>% 
+  group_by(Site, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellsni = count/sum(count),
+         total_predsni=sum(count))
+abshellpropsni
+
+PropshellSNIimg <- abshellpropsni %>%
+ ggplot() +
+  aes(x = Site, y = proportion_shellsni, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.2)) +
+  scale_fill_manual(values = c("Shell Intact" = "#228B22", "Shell Missing" = "#0C4C8A", "Shell Damaged"= "#EF562D")) +
+  labs(
+    x = "Site (SNI)",
+    y = "Proportion Shell Remain",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) 
+PropshellSNIimg
+```
+
+###Shell remain type by Site SCI
+```{r}
+abpredationshellchiSCI <- abpredationshellchi %>% 
+  filter( Island=="SCI")
+abpredationshellchiSCI
+
+abshellpropsci <- abpredationshellchiSCI %>% 
+  group_by(Site, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellsci = count/sum(count),
+         total_predsci=sum(count))
+abshellpropsci
+
+ggplot(abshellpropsci) +
+  aes(x = Site, y = proportion_shellsci, fill = Shell_status) +
+  geom_bar(stat = "summary", fun = "sum") +
+  scale_fill_hue(direction = 1) +
+  theme_minimal()
+
+PropshellSCIimg <- abshellpropsci %>%
+ ggplot() +
+  aes(x = Site, y = proportion_shellsci, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.2)) +
+  scale_fill_manual(values = c("Shell Intact" = "#228B22", "Shell Missing" = "#0C4C8A", "Shell Damaged"= "#EF562D")) +
+  labs(
+    x = "Site",
+    y = "Proportion Shell Remain",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 14L),
+    axis.title.x = element_text(size = 14L),
+    axis.text.y = element_text(size = 9L),
+    axis.text.x = element_text(size = 9L, hjust=0.5, vjust=0.5),
+    legend.text = element_text(size = 9L),
+    legend.title = element_text(size = 10L),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 9)
+  ) 
+PropshellSCIimg
+```
+
+
+#Figures for Manuscript
+##Figure 2
+```{r}
+Figure_2 <- abpredationspaceprop1 %>%
+ ggplot() +
+  aes(x = Site, y = proportion_predated, fill = Zone) +
+  geom_bar(stat = "identity", position = "dodge", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c(Mid = "white", Low = "gray70")) +
+  labs(
+    x = "Site",
+    y = "Proportion predated",
+    fill = "Intertidal Zone"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 28, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = c(0.85, 0.83),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 22),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) + 
+  facet_grid(.~Island, scales = "free_x", space = "free_x")
+Figure_2
+ggsave("Figure_2.png", Figure_2, width = 7, height = 4, units = "in")
+```
+
+##Figure a2
+```{r}
+abpredationshellprop1$Shell_Remain_Type <- factor(abpredationshellprop1$Shell_Remain_Type, levels = c("Intact", "Missing", "Damaged"))
+Figure_3a <- abpredationshellprop1 %>%
+  filter(Island %in% "San Clemente Island") %>% 
+ ggplot() +
+  aes(x = Zone, y = proportion_shellremain, fill = Shell_Remain_Type) +
+  geom_bar(stat = "identity", position = "stack", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  labs(
+   x = "Zone",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 4,
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 24, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 24, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+     axis.ticks.y = element_line(color = "black")
+  ) + 
+  facet_grid(.~Site)
+Figure_3a
+ggsave("Figure_a2a.png", Figure_3a, width = 7, height = 4, units = "in")
+
+Figure_3b <- abpredationshellprop1 %>%
+  filter(Island %in% "San Nicolas Island") %>% 
+ ggplot() +
+  aes(x = Zone, y = proportion_shellremain, fill = Shell_Remain_Type) +
+  geom_bar(stat = "identity", position = "stack", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  labs(
+   x = "Zone",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 4,
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 26, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 26, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 24, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 24, color = "black", family = "Times New Roman"),
+    legend.position="none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman")
+  ) + 
+  facet_grid(.~Site)
+Figure_3b
+ggsave("Figure_a2b.png", Figure_3b, width = 7, height = 4, units = "in")
+```
+
+## Figure 4
+```{r}
+df_mergedcrab$Island<-factor(df_mergedcrab$Island, levels= c("San Clemente Island","San Nicolas Island"), labels=c("San Clemente", "San Nicolas"))
+df_mergedcrab
+
+Figure_4a <- df_mergedcrab %>%
+ ggplot() +
+  aes(x = mean_crabdens, y = proportion_predated) +
+ geom_errorbarh(aes(xmin = mean_crabdens - se_crabdens, xmax = mean_crabdens + se_crabdens), height = 0.1) +
+  geom_jitter(size=3, width=0.02, shape = 21, aes(fill = Island),
+    stroke = 0.5) +
+scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  labs(x = expression(paste("Crab density (# per ", m^2, ")")), y = "Proportion predated") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 13, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 13, color = "black", family = "Times New Roman"),
+    legend.position = c(0.72, 0.15),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_4a
+ggsave("Figure_4a.png", Figure_4a, width = 3.5, height = 4, units = "in")
+
+df_mergedslp$Island<-factor(df_mergedslp$Island, levels= c("San Clemente Island","San Nicolas Island"), labels=c("San Clemente", "San Nicolas"))
+df_mergedslp
+
+Figure_4b <- df_mergedslp %>%
+ ggplot() +
+  aes(x = slope, y = proportion_predated) +
+ geom_errorbarh(aes(xmin = slope - se_slope, xmax = slope + se_slope), height = 0.1) +
+  geom_jitter(size=3, width=0.02, shape = 21, aes(fill = Island),
+    stroke = 0.5) +
+scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  labs(x = expression(paste("Slope (",degree,")")), y = "Proportion predated") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_4b
+ggsave("Figure_4b.png", Figure_4b, width = 3.5, height = 4, units = "in")
+
+Figure_4c <- df_mergedcrab %>%
+ ggplot() +
+  aes(x = Island, y = mean_crabdens, fill = Island) +
+ geom_boxplot() +
+  scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")) +
+  scale_y_continuous(
+    breaks = seq(0, 4, by = 1))+
+  coord_cartesian(ylim = c(0, 4)) +
+  labs(x = "Island", y = expression(paste("Crab density (# per ", m^2, ")"))) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_4c
+ggsave("Figure_4c.png", Figure_4c, width = 3.5, height = 4, units = "in")
+
+df_mergedslp$Island<-factor(df_mergedslp$Island, levels= c("San Clemente Island","San Nicolas Island"), labels=c("San Clemente", "San Nicolas"))
+
+Figure_4d <- df_mergedslp %>%
+ ggplot() +
+  aes(x = Island, y = slope, fill = Island) +
+ geom_boxplot() +
+  scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")) +
+  scale_y_continuous(
+    breaks = seq(0, 80, by = 20))+
+  coord_cartesian(ylim = c(0, 80)) +
+  labs(x = "Island", y = expression(paste("Slope (",degree,")"))) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_4d
+ggsave("Figure_4d.png", Figure_4d, width = 3.5, height = 4, units = "in")
+```
+
+## Figure 5
+```{r}
+labtethproptotal$Shell.Damage.1 <- factor(labtethproptotal$Shell.Damage.1, levels = c("Intact", "Missing", "Damaged"))
+labtethproptotal
+
+labtethproptotal$Predator.type<-factor(labtethproptotal$Predator.type, levels= c("CA Two Spot Octopus","Striped Shore Crab"), labels=c("Octopus", "Crab"))
+
+
+Figure_5 <- labtethproptotal %>%
+ ggplot() +
+  aes(x = Predator.type, y = proportion_shelldamage, fill = Shell.Damage.1) +
+  geom_bar(stat = "identity", position = "stack", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  labs(
+    x = "Predator",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 20, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_5
+ggsave("Figure_5.png", Figure_5, width = 7, height = 4, units = "in")
+```
+
+##Figure A.1
+```{r}
+abpredationmeanland<- abpredationspaceprop %>% 
+  filter(Predated==1) %>% 
+  group_by(Island, Site) %>% 
+  summarize(mean_proppredland=mean(proportion_predated),
+            count=n(),
+            se_proppredland=sd(proportion_predated)/sqrt(count))
+abpredationmeanland
+
+abpredationmeanland$Site <- factor(abpredationmeanland$Site, levels = c("Site 1", "Site 2", "Site 3", "Site 4", "Site 1", "Site 2", "Site 3", "Site 4"), labels= c("1", "2", "3", "4", "1", "2", "3", "4"))
+
+Figure_a1 <- abpredationmeanland %>%
+ ggplot() +
+  aes(x = Site, y = mean_proppredland) +
+  geom_bar(stat = "identity", color="black", size=0.4, fill="white") +
+  geom_errorbar(aes(ymin = mean_proppredland - se_proppredland, ymax = mean_proppredland + se_proppredland), color="black", width = 0.2)+
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  labs(
+    x = "Site",
+    y = "Proportion predated"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 18, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 18, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 14, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.position = c(0.85, 0.85),
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman")
+  ) + 
+  facet_grid(.~Island, scales = "free_x", space = "free_x")
+Figure_a1
+ggsave("Figure_a1.png", Figure_a1, width = 7, height = 4, units = "in")
+```
+
+##Figure 3
+```{r}
+abshellpropzone$Shell_status<- factor(abshellpropzone$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Intact", "Missing", "Damaged"))
+abshellpropzone$Shell_status <- factor(abshellpropzone$Shell_status, levels = c("Intact", "Missing", "Damaged"))
+abshellpropzone
+
+Figure_3a <- abshellpropzone %>%
+ ggplot() +
+  aes(x = Zone, y = proportion_shellzone, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  labs(
+    x = "Zone",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 20, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman"),
+    axis.ticks.y = element_line(color = "black")
+  ) 
+Figure_3a
+ggsave("Figure_3a.png", Figure_3a, width = 3.5, height = 4, units = "in")
+
+
+#Figure 3b
+abshellpropisland <- abpredationshellchi %>% 
+  group_by(Island, Shell_status) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion_shellisland = count/sum(count),
+         total_predisland=sum(count))
+abshellpropisland
+
+newrowx<- data.frame(Island = "SNI", Shell_status="Shell Damaged", count = 0, proportion_shellisland=0, total_predisland=35)
+abshellpropisland<-rbind(abshellpropisland, newrowx)
+abshellpropisland
+
+abshellpropisland$Shell_status<- factor(abshellpropisland$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Intact", "Missing", "Damaged"))
+
+abshellpropisland$Island<- factor(abshellpropisland$Island, levels=c("SCI", "SNI"), labels = c("San Clemente", "San Nicolas"))
+
+abshellpropisland$Shell_status <- factor(abshellpropisland$Shell_status, levels = c("Intact", "Missing", "Damaged"))
+
+Figure_3b <- abshellpropisland %>%
+ ggplot() +
+  aes(x = Island, y = proportion_shellisland, fill = Shell_status) +
+  geom_bar(stat = "identity", position = "stack", color="black", size=0.4) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.20))+
+  coord_cartesian(ylim = c(0, 1.10)) +
+  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  labs(
+    x = "Island",
+    y = "Proportion",
+    fill = "Shell Remain Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
+    axis.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    plot.title = element_text(hjust = 0.5, color = "black", family = "Times New Roman"),
+    axis.title.x = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.title.y = element_text(size = 22, color = "black", family = "Times New Roman"),
+    axis.text.y = element_text(size = 20, color = "black", family = "Times New Roman"),
+    axis.text.x = element_text(size = 16, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
+    legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
+    legend.title = element_text(size = 18, color = "black", family = "Times New Roman"),
+    legend.position = "none",
+    axis.line = element_blank(),     # Remove axis lines
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 18),
+    strip.background = element_blank(), 
+    panel.border = element_rect(color = "black", size = 1.2),  # Adjust border color and thickness
+    text = element_text(family = "Times New Roman")
+  ) 
+Figure_3b
+ggsave("Figure_3b.png", Figure_3b, width = 3.5, height = 4, units = "in")
+
+```
+
+
