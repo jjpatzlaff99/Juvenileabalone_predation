@@ -1026,10 +1026,7 @@ labtethoct <-labteth %>%  #filter out any rows where Predated = NA
   group_by(Octopus.name, Predated) %>% # group by the categories in predator type and shell damage
   summarize(count = n()) 
 labtethoct
-```
 
-###Shell remain in lab analysis
-```{r}
 labtethproptotal <-labteth %>%  #filter out any rows where Predated = NA
   filter(Predator.type!="control") %>% 
   filter(Predated=="Y") %>% 
@@ -1049,7 +1046,10 @@ newrow1b<- data.frame(Predator.type = "CA Two Spot Octopus", Shell.Damage.1="Dam
 labtethproptotal<- rbind(labtethproptotal, newrow1b, newrow1a)
 view(labtethproptotal)
 #this is a data frame for reference
+```
 
+###Shell remain in lab analysis
+```{r}
 #visualize the data
 Propshellremain_lab <- labtethproptotal %>% 
  ggplot() +
@@ -1696,7 +1696,7 @@ Figure_2 <- abpredationspaceprop1 %>%
   ) + 
   facet_grid(.~Island, scales = "free_x", space = "free_x")
 Figure_2
-ggsave("Figure_2.png", Figure_2, width = 7, height = 4, units = "in")
+ggsave("Figure_2.png", Figure_2, dpi = 1200, width = 7, height = 4, units = "in")
 ```
 
 ##Figure a2
@@ -1741,7 +1741,7 @@ Figure_3a <- abpredationshellprop1 %>%
   ) + 
   facet_grid(.~Site)
 Figure_3a
-ggsave("Figure_a2a.png", Figure_3a, width = 7, height = 4, units = "in")
+ggsave("Figure_a2a.png", Figure_3a, dpi=1200, width = 7, height = 4, units = "in")
 
 Figure_3b <- abpredationshellprop1 %>%
   filter(Island %in% "San Nicolas Island") %>% 
@@ -1769,7 +1769,6 @@ Figure_3b <- abpredationshellprop1 %>%
     axis.text.x = element_text(size = 14, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
     legend.text = element_text(size = 24, color = "black", family = "Times New Roman"),
     legend.title = element_text(size = 24, color = "black", family = "Times New Roman"),
-    legend.position="none",
     axis.line = element_blank(),     # Remove axis lines
     axis.ticks = element_blank(),
     panel.grid.major = element_blank(), # Remove major grid lines
@@ -1781,7 +1780,7 @@ Figure_3b <- abpredationshellprop1 %>%
   ) + 
   facet_grid(.~Site)
 Figure_3b
-ggsave("Figure_a2b.png", Figure_3b, width = 7, height = 4, units = "in")
+ggsave("Figure_a2b.png", Figure_3b, dpi=1200, width = 7, height = 4, units = "in")
 ```
 
 ## Figure 4
@@ -1823,7 +1822,7 @@ scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_4a
-ggsave("Figure_4a.png", Figure_4a, width = 3.5, height = 4, units = "in")
+ggsave("Figure_4a.png", Figure_4a, dpi=1200, width = 3.5, height = 4, units = "in")
 
 df_mergedslp$Island<-factor(df_mergedslp$Island, levels= c("San Clemente Island","San Nicolas Island"), labels=c("San Clemente", "San Nicolas"))
 df_mergedslp
@@ -1862,7 +1861,7 @@ scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_4b
-ggsave("Figure_4b.png", Figure_4b, width = 3.5, height = 4, units = "in")
+ggsave("Figure_4b.png", Figure_4b, dpi=1200, width = 3.5, height = 4, units = "in")
 
 Figure_4c <- df_mergedcrab %>%
  ggplot() +
@@ -1896,9 +1895,7 @@ Figure_4c <- df_mergedcrab %>%
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_4c
-ggsave("Figure_4c.png", Figure_4c, width = 3.5, height = 4, units = "in")
-
-df_mergedslp$Island<-factor(df_mergedslp$Island, levels= c("San Clemente Island","San Nicolas Island"), labels=c("San Clemente", "San Nicolas"))
+ggsave("Figure_4c.png", Figure_4c,dpi=1200, width = 3.5, height = 4, units = "in")
 
 Figure_4d <- df_mergedslp %>%
  ggplot() +
@@ -1932,7 +1929,7 @@ Figure_4d <- df_mergedslp %>%
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_4d
-ggsave("Figure_4d.png", Figure_4d, width = 3.5, height = 4, units = "in")
+ggsave("Figure_4d.png", Figure_4d, dpi=1200, width = 3.5, height = 4, units = "in")
 ```
 
 ## Figure 5
@@ -1978,7 +1975,7 @@ Figure_5 <- labtethproptotal %>%
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_5
-ggsave("Figure_5.png", Figure_5, width = 7, height = 4, units = "in")
+ggsave("Figure_5.png", Figure_5, dpi=1200, width = 7, height = 4, units = "in")
 ```
 
 ##Figure A.1
@@ -2028,7 +2025,7 @@ Figure_a1 <- abpredationmeanland %>%
   ) + 
   facet_grid(.~Island, scales = "free_x", space = "free_x")
 Figure_a1
-ggsave("Figure_a1.png", Figure_a1, width = 7, height = 4, units = "in")
+ggsave("Figure_a1.png", Figure_a1, dpi=1200, width = 7, height = 4, units = "in")
 ```
 
 ##Figure 3
@@ -2073,7 +2070,7 @@ Figure_3a <- abshellpropzone %>%
     axis.ticks.y = element_line(color = "black")
   ) 
 Figure_3a
-ggsave("Figure_3a.png", Figure_3a, width = 3.5, height = 4, units = "in")
+ggsave("Figure_3a.png", Figure_3a, dpi=1200, width = 3.5, height = 4, units = "in")
 
 
 #Figure 3b
@@ -2118,7 +2115,6 @@ Figure_3b <- abshellpropisland %>%
     axis.text.x = element_text(size = 16, hjust=0.5, vjust=0.5, color = "black", family = "Times New Roman"),
     legend.text = element_text(size = 16, color = "black", family = "Times New Roman"),
     legend.title = element_text(size = 18, color = "black", family = "Times New Roman"),
-    legend.position = "none",
     axis.line = element_blank(),     # Remove axis lines
     axis.ticks = element_blank(),
     panel.grid.major = element_blank(), # Remove major grid lines
@@ -2129,7 +2125,7 @@ Figure_3b <- abshellpropisland %>%
     text = element_text(family = "Times New Roman")
   ) 
 Figure_3b
-ggsave("Figure_3b.png", Figure_3b, width = 3.5, height = 4, units = "in")
+ggsave("Figure_3b.png", Figure_3b, dpi=1200, width = 3.5, height = 4, units = "in")
 
 ```
 
