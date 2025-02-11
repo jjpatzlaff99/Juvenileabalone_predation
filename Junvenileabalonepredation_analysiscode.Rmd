@@ -53,7 +53,7 @@ setwd("~/Documents/GitHub/Juvenileabalone_predation")
 ```{r}
 #reads in the data set which contains all data. Each row is a single abalone that was deployed, and contains other columns indicating region, site, zone, date, etc. 
 
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv",header=T)
+abpredation<-read.csv("Juvenile_abalone_predationms_SNISCI23_24_final.csv",header=T)
 
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
@@ -61,7 +61,7 @@ view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 20, 21, 23:39)) %>% 
+  select(-c(8:9, 20, 21, 23:38)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
@@ -76,7 +76,7 @@ view(abpredationspace)
 #now left with 269 replicates after exclusions were made
 
 #total deployed per site.
-abpredationspacetot<-abpredation2s %>%  
+abpredationspacetot<-abpredation2 %>%  
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control")  #filter out controls #filter out reps we are excluding
 abpredationspacetot
@@ -86,7 +86,7 @@ abpredationspacetotcount<-abpredationspacetot %>%
 abpredationspacetotcount
 
 # total excluded per site
-abpredationspaceexclude<-abpredation2s %>%  
+abpredationspaceexclude<-abpredation2 %>%  
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") %>%  #filter out controls
   filter(Exclude.analysis1=="Yes") #filter out reps we are excluding
@@ -430,14 +430,14 @@ plot(sim_resid3)
 ### Predator density + habitat characteristics 
 ```{r}
 #read in data again
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv", header=T)
+abpredation<-read.csv("Juvenile_abalone_predationms_SNISCI23_24_final.csv", header=T)
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
 view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 20, 21, 26:28, 32:34, 39)) %>% 
+  select(-c(8:9, 20, 21, 26:28, 32:34)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
@@ -1154,7 +1154,7 @@ significant
 ```
 ##Shell remain type in field
 ```{r}
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv", header=T)
+abpredation<-read.csv("Juvenile_abalone_predationms_SNISCI23_24_final.csv", header=T)
 
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
@@ -1162,7 +1162,7 @@ view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 21, 23:39)) %>% 
+  select(-c(8:9, 21, 23:38)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
