@@ -53,7 +53,7 @@ setwd("~/Documents/GitHub/Juvenileabalone_predation")
 ```{r}
 #reads in the data set which contains all data. Each row is a single abalone that was deployed, and contains other columns indicating region, site, zone, date, etc. 
 
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv",header=T)
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv",header=T)
 
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
@@ -61,7 +61,7 @@ view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 20, 21, 23:40)) %>% 
+  select(-c(8:9, 20, 21, 23:39)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
@@ -430,14 +430,14 @@ plot(sim_resid3)
 ### Predator density + habitat characteristics 
 ```{r}
 #read in data again
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv", header=T)
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv", header=T)
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
 view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 20, 21, 27:29, 34:35, 40)) %>% 
+  select(-c(8:9, 20, 21, 26:28, 32:34, 39)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
@@ -799,6 +799,7 @@ plot(ab_binomial_habpredfinal)
 ##Pred and Hab variables by Island
 ### Crab density by Island analysis
 ```{r}
+
 #although crab density did not have an effect on proportion predated, it did appear to differ by Island. We will test for this difference using a two-sample t test. Here we should have 6 transects from San Clemente and 8 transects from San Nicolas Island. We have included 2 transects from SCI Site 2 here that were not included in the GLM. 
 
 ggplot(df_mergedcrab, aes(x = factor(Island), y = mean_crabdens)) +
@@ -834,6 +835,7 @@ leveneTest(mean_crabdens ~ Island, data = df_mergedcrab)
 t.test(mean_crabdens ~ Island, data = df_mergedcrab, var.equal = TRUE)
 #p=0.006, so we can reject the null hypothesis, meaning crab density does differ by island.
 ```
+
 ### Slope by Island analysis
 ```{r}
 #although slope did not have an effect on proportion predated, it did appear to differ by Island. We will test for this difference using a two-sample t test. Here we should have 5 transects from San Clemente and 8 transects from San Nicolas Island. We have included 1 transect from SCI Site 2 here that was not included in the GLM. 
@@ -988,7 +990,7 @@ wilcox.test(prop_crev ~ Island, data = df_mergedtotal)
 ##Lab tethering
 ###Shell remain in lab
 ```{r}
-labteth<-read.csv("Labtethering_juv_abalone_predation1.csv",header=T)
+labteth<-read.csv("Labtethering_juv_abalone_predation.csv",header=T)
 view(labteth) #visualize the data frame
 str(labteth)
 labteth$Start.Date<- as.factor(labteth$Start.Date)
@@ -1152,7 +1154,7 @@ significant
 ```
 ##Shell remain type in field
 ```{r}
-abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24withexclusions.xl.csv", header=T)
+abpredation<-read.csv("Juvenileabalone_predation_SNISCI23_24_final.xl.csv", header=T)
 
 abpredation<-subset(abpredation, Island== "SNI" | Island=="SCI")
 #excludes any blanks or NAs where island is not displayed
@@ -1160,7 +1162,7 @@ view(abpredation)
 
 #exclude any irrelevant columns, filter out controls + nas
 abpredation2 <- abpredation %>% 
-  select(-c(8:9, 21, 23:40)) %>% 
+  select(-c(8:9, 21, 23:39)) %>% 
   filter(!is.na(Predated.1)) %>% #filter out any rows where Predated = NA
   filter(Control=="Not control") 
 view(abpredation2)
