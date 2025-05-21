@@ -1671,7 +1671,7 @@ Figure_2 <- abpredationspaceprop1 %>%
   scale_fill_manual(values = c(Mid = "white", Low = "gray70")) +
   labs(
     x = "Site",
-    y = "Proportion predated",
+    y = "Proportion consumed",
     fill = "Intertidal Zone"
   ) +
   theme_bw() +
@@ -1800,7 +1800,7 @@ scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")
   scale_y_continuous(
     breaks = seq(0, 1, by = 0.20))+
   coord_cartesian(ylim = c(0, 1.10)) +
-  labs(x = expression(paste("Crab density (# per ", m^2, ")")), y = "Proportion predated") +
+  labs(x = expression(paste("Crab density (# per ", m^2, ")")), y = "Proportion consumed") +
   theme_bw() +
   theme(
     axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
@@ -1839,7 +1839,7 @@ scale_fill_manual(values = c("San Clemente" = "gray50", "San Nicolas" = "white")
   scale_y_continuous(
     breaks = seq(0, 1, by = 0.20))+
   coord_cartesian(ylim = c(0, 1.10)) +
-  labs(x = expression(paste("Slope (",degree,")")), y = "Proportion predated") +
+  labs(x = expression(paste("Slope (",degree,")")), y = "Proportion consumed") +
   theme_bw() +
   theme(
     axis.text = element_text(size = 10, color ="black", family = "Times New Roman"),
@@ -2032,9 +2032,9 @@ ggsave("Figure_a1.png", Figure_a1, dpi=1200, width = 7, height = 4, units = "in"
 
 ##Figure 3
 ```{r}
-abshellpropzone$Shell_status<- factor(abshellpropzone$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Intact", "Missing", "Damaged"))
-abshellpropzone$Shell_status <- factor(abshellpropzone$Shell_status, levels = c("Intact", "Missing", "Damaged"))
+abshellpropzone$Shell_status<- factor(abshellpropzone$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Shell intact", "Shell removed", "Shell damaged"))
 abshellpropzone
+
 
 Figure_3a <- abshellpropzone %>%
  ggplot() +
@@ -2043,11 +2043,11 @@ Figure_3a <- abshellpropzone %>%
   scale_y_continuous(
     breaks = seq(0, 1, by = 0.20))+
   coord_cartesian(ylim = c(0, 1.10)) +
-  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  scale_fill_manual(values = c("Shell intact" = "white", "Shell removed" = "gray80", "Shell damaged"= "gray35")) +
   labs(
     x = "Zone",
     y = "Proportion",
-    fill = "Shell Remain Type"
+    fill = "Tether remains"
   ) +
   theme_bw() +
   theme(
@@ -2087,11 +2087,9 @@ newrowx<- data.frame(Island = "SNI", Shell_status="Shell Damaged", count = 0, pr
 abshellpropisland<-rbind(abshellpropisland, newrowx)
 abshellpropisland
 
-abshellpropisland$Shell_status<- factor(abshellpropisland$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Intact", "Missing", "Damaged"))
+abshellpropisland$Shell_status<- factor(abshellpropisland$Shell_status, levels=c("Shell Intact", "Shell Missing", "Shell Damaged"), labels = c("Shell intact", "Shell removed", "Shell damaged"))
 
 abshellpropisland$Island<- factor(abshellpropisland$Island, levels=c("SCI", "SNI"), labels = c("San Clemente", "San Nicolas"))
-
-abshellpropisland$Shell_status <- factor(abshellpropisland$Shell_status, levels = c("Intact", "Missing", "Damaged"))
 
 Figure_3b <- abshellpropisland %>%
  ggplot() +
@@ -2100,11 +2098,11 @@ Figure_3b <- abshellpropisland %>%
   scale_y_continuous(
     breaks = seq(0, 1, by = 0.20))+
   coord_cartesian(ylim = c(0, 1.10)) +
-  scale_fill_manual(values = c("Intact" = "white", "Missing" = "gray80", "Damaged"= "gray35")) +
+  scale_fill_manual(values = c("Shell intact" = "white", "Shell removed" = "gray80", "Shell damaged"= "gray35")) +
   labs(
     x = "Island",
     y = "Proportion",
-    fill = "Shell Remain Type"
+    fill = "Tether remains"
   ) +
   theme_bw() +
   theme(
